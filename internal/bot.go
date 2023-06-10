@@ -20,6 +20,7 @@ const (
 type Bot struct {
 	telegram     *telegram.BotAPI
 	ai           *AI
+	store        *Store
 	allowedUsers map[int64]bool
 }
 
@@ -44,7 +45,7 @@ func NewBot() (*Bot, error) {
 		return nil, errors.New("no allowed users")
 	}
 
-	return &Bot{bot, NewAI(), allowedUsers}, nil
+	return &Bot{bot, NewAI(), NewStore(), allowedUsers}, nil
 }
 
 func (b *Bot) Run() error {
@@ -86,11 +87,29 @@ func (b *Bot) handle(msg *telegram.Message) error {
 }
 
 func (b *Bot) handleCommand(ctx context.Context, msg *telegram.Message) error {
+	switch msg.Command() {
+	case "clear":
+		b.store.Clear(msg.Chat.ID)
+		log.WithField("from", msg.From).Info("Cleared thread.")
+	default:
+		log.WithFields(log.Fields{
+			"from":    msg.From,
+			"command": msg.Command(),
+		}).Info("Skiping unsupported command.")
+
+	}
 	return nil
 }
 
 func (b *Bot) handleText(ctx context.Context, msg *telegram.Message) error {
-	stream, err := b.ai.StreamingReply(ctx, msg.Text)
+	b.store.Put(msg)
+	thread := b.store.Thread(msg.Chat.ID)
+	log.WithFields(log.Fields{
+		"from":        msg.From,
+		"thread_size": len(thread),
+	}).Debug("Handling text.")
+
+	stream, err := b.ai.StreamingReply(ctx, thread)
 	if err != nil {
 		return err
 	}
@@ -128,8 +147,13 @@ func (b *Bot) handleText(ctx context.Context, msg *telegram.Message) error {
 		delta = []string{}
 	}
 
-	_, err = b.streamMessage(msg.Chat.ID, reply, strings.Join(delta, ""))
-	return err
+	reply, err = b.streamMessage(msg.Chat.ID, reply, strings.Join(delta, ""))
+	if err != nil {
+		return err
+	}
+
+	b.store.Put(reply)
+	return nil
 }
 
 func (b *Bot) handleAudio(ctx context.Context, msg *telegram.Message) error {
@@ -138,7 +162,7 @@ func (b *Bot) handleAudio(ctx context.Context, msg *telegram.Message) error {
 
 func (b *Bot) streamMessage(chatID int64, msg *telegram.Message, delta string) (*telegram.Message, error) {
 	if strings.TrimSpace(delta) == "" {
-		return nil, nil
+		return msg, nil
 	}
 
 	if msg == nil {

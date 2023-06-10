@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 
+	telegram "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -19,18 +20,26 @@ type StreamChunk struct {
 	Error error
 }
 
-func (a *AI) StreamingReply(ctx context.Context, text string) (chan StreamChunk, error) {
+func (a *AI) StreamingReply(ctx context.Context, thread []*telegram.Message) (chan StreamChunk, error) {
+	messages := []openai.ChatCompletionMessage{}
+	for _, msg := range thread {
+		role := openai.ChatMessageRoleUser
+		if msg.ViaBot != nil {
+			role = openai.ChatMessageRoleAssistant
+		}
+
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    role,
+			Content: msg.Text,
+		})
+	}
+
 	stream, err := a.openai.CreateChatCompletionStream(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model: openai.GPT3Dot5Turbo,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleUser,
-					Content: text,
-				},
-			},
-			Stream: true,
+			Model:    openai.GPT3Dot5Turbo,
+			Messages: messages,
+			Stream:   true,
 		},
 	)
 	if err != nil {
