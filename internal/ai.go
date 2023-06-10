@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"os"
 
 	telegram "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	openai "github.com/sashabaranov/go-openai"
@@ -12,12 +13,24 @@ type AI struct {
 }
 
 func NewAI() *AI {
-	return &AI{openai.NewClient(MustGetEnv("ROBOTRON_OPENAI_API_KEY"))}
+	return &AI{openai.NewClient(mustGetEnv("ROBOTRON_OPENAI_API_KEY"))}
 }
 
 type StreamChunk struct {
 	Delta string
 	Error error
+}
+
+func (a *AI) Transcribe(ctx context.Context, file *os.File) (string, error) {
+	res, err := a.openai.CreateTranscription(ctx, openai.AudioRequest{
+		Model:    openai.Whisper1,
+		FilePath: file.Name(),
+		Format:   openai.AudioResponseFormatJSON,
+	})
+	if err != nil {
+		return "", err
+	}
+	return res.Text, nil
 }
 
 func (a *AI) StreamingReply(ctx context.Context, thread []*telegram.Message) (chan StreamChunk, error) {

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/ioutil"
+	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -25,14 +28,14 @@ type Bot struct {
 }
 
 func NewBot() (*Bot, error) {
-	bot, err := telegram.NewBotAPI(MustGetEnv("ROBOTRON_TELEGRAM_TOKEN"))
+	bot, err := telegram.NewBotAPI(mustGetEnv("ROBOTRON_TELEGRAM_TOKEN"))
 	if err != nil {
 		return nil, err
 	}
 
 	allowedUsers := make(map[int64]bool)
 
-	ids := strings.Split(MustGetEnv("ROBOTRON_ALLOWED_USERS"), ",")
+	ids := strings.Split(mustGetEnv("ROBOTRON_ALLOWED_USERS"), ",")
 	for _, id := range ids {
 		id, err := strconv.ParseInt(id, 10, 64)
 		if err != nil {
@@ -78,8 +81,8 @@ func (b *Bot) handle(msg *telegram.Message) error {
 		return b.handleCommand(ctx, msg)
 	case msg.Text != "":
 		return b.handleText(ctx, msg)
-	case msg.Audio != nil:
-		return b.handleAudio(ctx, msg)
+	case msg.Voice != nil:
+		return b.handleVoice(ctx, msg)
 	default:
 		log.Info("Skiping unsupported message.")
 		return nil
@@ -103,6 +106,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *telegram.Message) error {
 
 func (b *Bot) handleText(ctx context.Context, msg *telegram.Message) error {
 	b.store.Put(msg)
+
 	thread := b.store.Thread(msg.Chat.ID)
 	log.WithFields(log.Fields{
 		"from":        msg.From,
@@ -156,8 +160,38 @@ func (b *Bot) handleText(ctx context.Context, msg *telegram.Message) error {
 	return nil
 }
 
-func (b *Bot) handleAudio(ctx context.Context, msg *telegram.Message) error {
-	return nil
+func (b *Bot) handleVoice(ctx context.Context, msg *telegram.Message) error {
+	ogg, err := b.downloadFile(msg.Voice.FileID)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(ogg.Name())
+
+	mp3, err := ioutil.TempFile(os.TempDir(), "voice-*.mp3")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(mp3.Name())
+
+	if err := transcode(ogg, mp3); err != nil {
+		return err
+	}
+
+	text, err := b.ai.Transcribe(ctx, mp3)
+	if err != nil {
+		return err
+	}
+
+	log.WithFields(log.Fields{
+		"from":            msg.From,
+		"voice_size":      msg.Voice.FileSize,
+		"voice_duration":  msg.Voice.Duration,
+		"voice_mime_type": msg.Voice.MimeType,
+		"text":            text,
+	}).Debug("Transcribed voice.")
+
+	msg.Text = text
+	return b.handleText(ctx, msg)
 }
 
 func (b *Bot) streamMessage(chatID int64, msg *telegram.Message, delta string) (*telegram.Message, error) {
@@ -200,4 +234,30 @@ func (b *Bot) notifyTyping(ctx context.Context, chatID int64) (func(), error) {
 	}()
 
 	return cancel, nil
+}
+
+func (b *Bot) downloadFile(fileID string) (*os.File, error) {
+	url, err := b.telegram.GetFileDirectURL(fileID)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+
+	defer res.Body.Close()
+
+	file, err := ioutil.TempFile(os.TempDir(), "voice-*.ogg")
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = io.Copy(file, res.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return file, nil
 }
