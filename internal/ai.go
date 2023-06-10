@@ -2,11 +2,17 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"time"
 
 	telegram "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	openai "github.com/sashabaranov/go-openai"
 )
+
+const SystemPrompt = `You are Robotron, a personal robot assistant.
+Today is %s.
+`
 
 type AI struct {
 	openai *openai.Client
@@ -34,7 +40,13 @@ func (a *AI) Transcribe(ctx context.Context, file *os.File) (string, error) {
 }
 
 func (a *AI) StreamingReply(ctx context.Context, thread []*telegram.Message) (chan StreamChunk, error) {
-	messages := []openai.ChatCompletionMessage{}
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: fmt.Sprintf(SystemPrompt, time.Now().Format("Monday, January 2, 2006 3:04 PM")),
+		},
+	}
+
 	for _, msg := range thread {
 		role := openai.ChatMessageRoleUser
 		if msg.ViaBot != nil {

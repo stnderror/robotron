@@ -99,7 +99,6 @@ func (b *Bot) handleCommand(ctx context.Context, msg *telegram.Message) error {
 			"from":    msg.From,
 			"command": msg.Command(),
 		}).Info("Skiping unsupported command.")
-
 	}
 	return nil
 }
