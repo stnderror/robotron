@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
@@ -166,7 +165,7 @@ func (b *Bot) handleVoice(ctx context.Context, msg *telegram.Message) error {
 	}
 	defer os.Remove(ogg.Name())
 
-	mp3, err := ioutil.TempFile(os.TempDir(), "voice-*.mp3")
+	mp3, err := os.CreateTemp(os.TempDir(), "voice-*.mp3")
 	if err != nil {
 		return err
 	}
@@ -248,7 +247,7 @@ func (b *Bot) downloadFile(fileID string) (*os.File, error) {
 
 	defer res.Body.Close()
 
-	file, err := ioutil.TempFile(os.TempDir(), "voice-*.ogg")
+	file, err := os.CreateTemp(os.TempDir(), "voice-*.ogg")
 	if err != nil {
 		return nil, err
 	}
