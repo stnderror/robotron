@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,8 +18,9 @@ const (
 )
 
 type Bot struct {
-	telegram *telegram.BotAPI
-	ai       *AI
+	telegram     *telegram.BotAPI
+	ai           *AI
+	allowedUsers map[int64]bool
 }
 
 func NewBot() (*Bot, error) {
@@ -26,7 +28,23 @@ func NewBot() (*Bot, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Bot{bot, NewAI()}, nil
+
+	allowedUsers := make(map[int64]bool)
+
+	ids := strings.Split(MustGetEnv("ROBOTRON_ALLOWED_USERS"), ",")
+	for _, id := range ids {
+		id, err := strconv.ParseInt(id, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		allowedUsers[id] = true
+	}
+
+	if len(allowedUsers) == 0 {
+		return nil, errors.New("no allowed users")
+	}
+
+	return &Bot{bot, NewAI(), allowedUsers}, nil
 }
 
 func (b *Bot) Run() error {
@@ -48,6 +66,11 @@ func (b *Bot) Run() error {
 func (b *Bot) handle(msg *telegram.Message) error {
 	ctx, cancel := context.WithTimeout(context.Background(), handlingTimeout)
 	defer cancel()
+
+	if !b.allowedUsers[msg.From.ID] {
+		log.WithField("from", msg.From).Info("User is not allowed.")
+		return nil
+	}
 
 	switch {
 	case msg.IsCommand():
