@@ -72,12 +72,20 @@ func (b *Bot) handleText(ctx context.Context, msg *telegram.Message) error {
 		return err
 	}
 
+	cancel, err := b.notifyTyping(ctx, msg.Chat.ID)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+
 	var (
 		reply *telegram.Message
 	)
 
 	delta := []string{}
 	for chunk := range stream {
+		cancel()
+
 		if chunk.Error != nil {
 			if errors.Is(chunk.Error, io.EOF) {
 				break
@@ -96,6 +104,7 @@ func (b *Bot) handleText(ctx context.Context, msg *telegram.Message) error {
 		}
 		delta = []string{}
 	}
+
 	_, err = b.streamMessage(msg.Chat.ID, reply, strings.Join(delta, ""))
 	return err
 }
@@ -116,4 +125,32 @@ func (b *Bot) streamMessage(chatID int64, msg *telegram.Message, delta string) (
 
 	sent, err := b.telegram.Send(telegram.NewEditMessageText(chatID, msg.MessageID, msg.Text+delta))
 	return &sent, err
+}
+
+func (b *Bot) notifyTyping(ctx context.Context, chatID int64) (func(), error) {
+	if _, err := b.telegram.Request(telegram.NewChatAction(chatID, telegram.ChatTyping)); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	ticker := time.NewTicker(3 * time.Second)
+
+	go func() {
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				_, err := b.telegram.Request(telegram.NewChatAction(chatID, telegram.ChatTyping))
+				if err != nil {
+					log.WithError(err).Warn("Failed to send chat action.")
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return cancel, nil
 }
