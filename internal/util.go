@@ -1,19 +1,12 @@
 package internal
 
 import (
-	"fmt"
+	"bytes"
 	"os"
+	"text/template"
 
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
-
-func mustGetEnv(key string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		panic(fmt.Errorf("%s not found", key))
-	}
-	return value
-}
 
 func transcode(in, out *os.File) error {
 	return ffmpeg.Input(in.Name(), ffmpeg.KwArgs{"loglevel": "panic"}).
@@ -22,4 +15,12 @@ func transcode(in, out *os.File) error {
 		Silent(true).
 		ErrorToStdOut().
 		Run()
+}
+
+func mustRender(tmpl *template.Template, data any) string {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		panic(err)
+	}
+	return buf.String()
 }
