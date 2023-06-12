@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -26,28 +25,18 @@ type Bot struct {
 	allowedUsers map[int64]bool
 }
 
-func NewBot() (*Bot, error) {
-	bot, err := telegram.NewBotAPI(mustGetEnv("ROBOTRON_TELEGRAM_TOKEN"))
+func NewBot(cfg Config) (*Bot, error) {
+	bot, err := telegram.NewBotAPI(cfg.TelegramToken)
 	if err != nil {
 		return nil, err
 	}
 
 	allowedUsers := make(map[int64]bool)
-
-	ids := strings.Split(mustGetEnv("ROBOTRON_ALLOWED_USERS"), ",")
-	for _, id := range ids {
-		id, err := strconv.ParseInt(id, 10, 64)
-		if err != nil {
-			return nil, err
-		}
+	for _, id := range cfg.AllowedUsers {
 		allowedUsers[id] = true
 	}
 
-	if len(allowedUsers) == 0 {
-		return nil, errors.New("no allowed users")
-	}
-
-	return &Bot{bot, NewAI(), NewStore(), allowedUsers}, nil
+	return &Bot{bot, NewAI(cfg), NewStore(), allowedUsers}, nil
 }
 
 func (b *Bot) Run() error {

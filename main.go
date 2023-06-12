@@ -10,18 +10,19 @@ import (
 func init() {
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetOutput(os.Stdout)
-
-	level, err := log.ParseLevel(os.Getenv("ROBOTRON_LOG_LEVEL"))
-	if err != nil {
-		log.SetLevel(log.InfoLevel)
-	}
-	log.SetLevel(level)
 }
 
 func main() {
 	log.Info("Starting.")
 
-	bot, err := internal.NewBot()
+	cfg, err := internal.ConfigFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.SetLevel(cfg.LogLevel)
+
+	bot, err := internal.NewBot(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}

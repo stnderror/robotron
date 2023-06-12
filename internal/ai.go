@@ -2,24 +2,36 @@ package internal
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"text/template"
 	"time"
 
 	telegram "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	openai "github.com/sashabaranov/go-openai"
 )
 
-const SystemPrompt = `You are Robotron, a personal robot assistant.
-Today is %s.
-`
+var systemPrompt = `You are Robotron, a personal robot assistant.
+
+## Context
+
+* Today is {{.Today}}.
+
+## Rules
+
+* Use the {{.MeasureUnits}} system.`
 
 type AI struct {
-	openai *openai.Client
+	openai       *openai.Client
+	measureUnits string
+	systemPrompt *template.Template
 }
 
-func NewAI() *AI {
-	return &AI{openai.NewClient(mustGetEnv("ROBOTRON_OPENAI_API_KEY"))}
+func NewAI(cfg Config) *AI {
+	return &AI{
+		openai:       openai.NewClient(cfg.OpenAIAPIKey),
+		measureUnits: cfg.MeasureUnits,
+		systemPrompt: template.Must(template.New("systemPrompt").Parse(systemPrompt)),
+	}
 }
 
 type StreamChunk struct {
@@ -42,8 +54,14 @@ func (a *AI) Transcribe(ctx context.Context, file *os.File) (string, error) {
 func (a *AI) StreamingReply(ctx context.Context, thread []*telegram.Message) (chan StreamChunk, error) {
 	messages := []openai.ChatCompletionMessage{
 		{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: fmt.Sprintf(SystemPrompt, time.Now().Format("Monday, January 2, 2006 3:04 PM")),
+			Role: openai.ChatMessageRoleSystem,
+			Content: mustRender(a.systemPrompt, struct {
+				Today        string
+				MeasureUnits string
+			}{
+				Today:        time.Now().Format("Monday, January 2, 2006 3:04 PM"),
+				MeasureUnits: a.measureUnits,
+			}),
 		},
 	}
 
