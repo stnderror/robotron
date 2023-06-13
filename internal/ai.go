@@ -10,6 +10,10 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
+const (
+	imagineVariants = 2
+)
+
 var systemPrompt = `You are Robotron, a personal robot assistant.
 
 ## Context
@@ -37,6 +41,25 @@ func NewAI(cfg Config) *AI {
 type StreamChunk struct {
 	Delta string
 	Error error
+}
+
+func (a *AI) Imagine(ctx context.Context, prompt string) ([]string, error) {
+	res, err := a.openai.CreateImage(ctx, openai.ImageRequest{
+		Prompt:         prompt,
+		Size:           openai.CreateImageSize1024x1024,
+		ResponseFormat: openai.CreateImageResponseFormatURL,
+		N:              imagineVariants,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var urls []string
+	for _, img := range res.Data {
+		urls = append(urls, img.URL)
+	}
+
+	return urls, nil
 }
 
 func (a *AI) Transcribe(ctx context.Context, file *os.File) (string, error) {

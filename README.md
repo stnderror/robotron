@@ -2,6 +2,12 @@
 
 A personal robot assistant for Telegram built with OpenAI.
 
+## Features
+
+- Chat with ChatGPT
+- Voice recognition with Whisper
+- Image generation with DALL·E
+
 ## Dependencies
 
 The following dependencies must be installed in your system to run Robotron:
