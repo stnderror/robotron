@@ -26,8 +26,15 @@ type Bot struct {
 }
 
 func NewBot(cfg Config) (*Bot, error) {
-	bot, err := telegram.NewBotAPI(cfg.TelegramToken)
+	tg, err := telegram.NewBotAPI(cfg.TelegramToken)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := registerCommands(tg, map[string]string{
+		"clear":   "Clears current chat",
+		"imagine": "Generates an image",
+	}); err != nil {
 		return nil, err
 	}
 
@@ -36,7 +43,7 @@ func NewBot(cfg Config) (*Bot, error) {
 		allowedUsers[id] = true
 	}
 
-	return &Bot{bot, NewAI(cfg), NewStore(), allowedUsers}, nil
+	return &Bot{tg, NewAI(cfg), NewStore(), allowedUsers}, nil
 }
 
 func (b *Bot) Run() error {
@@ -78,15 +85,59 @@ func (b *Bot) handle(msg *telegram.Message) error {
 }
 
 func (b *Bot) handleCommand(ctx context.Context, msg *telegram.Message) error {
+	log.WithFields(
+		log.Fields{
+			"from":    msg.From,
+			"command": msg.Command(),
+			"args":    msg.CommandArguments(),
+		},
+	).Info("Handling command.")
+
 	switch msg.Command() {
 	case "clear":
-		b.store.Clear(msg.Chat.ID)
-		log.WithField("from", msg.From).Info("Cleared thread.")
+		return b.handleClearCommand(ctx, msg)
+	case "imagine":
+		return b.handleImagineCommand(ctx, msg)
 	default:
 		log.WithFields(log.Fields{
 			"from":    msg.From,
 			"command": msg.Command(),
-		}).Info("Skiping unsupported command.")
+			"args":    msg.CommandArguments(),
+		}).Info("Skipped unsupported command.")
+	}
+	return nil
+}
+
+func (b *Bot) handleClearCommand(ctx context.Context, msg *telegram.Message) error {
+	b.store.Clear(msg.Chat.ID)
+	return nil
+}
+
+func (b *Bot) handleImagineCommand(ctx context.Context, msg *telegram.Message) error {
+	prompt := msg.CommandArguments()
+	if prompt == "" {
+		_, err := b.message(msg.Chat.ID, "Please provide a prompt.")
+		return err
+	}
+
+	cancel, err := b.notify(ctx, msg.Chat.ID, telegram.ChatUploadPhoto)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+
+	imgs, err := b.ai.Imagine(ctx, prompt)
+	if err != nil {
+		return err
+	}
+
+	files := make([]any, len(imgs))
+	for i, img := range imgs {
+		files[i] = telegram.NewInputMediaPhoto(telegram.FileURL(img))
+	}
+
+	if _, err := b.telegram.Request(telegram.NewMediaGroup(msg.Chat.ID, files)); err != nil {
+		return err
 	}
 	return nil
 }
@@ -105,7 +156,7 @@ func (b *Bot) handleText(ctx context.Context, msg *telegram.Message) error {
 		return err
 	}
 
-	cancel, err := b.notifyTyping(ctx, msg.Chat.ID)
+	cancel, err := b.notify(ctx, msg.Chat.ID, telegram.ChatTyping)
 	if err != nil {
 		return err
 	}
@@ -181,6 +232,10 @@ func (b *Bot) handleVoice(ctx context.Context, msg *telegram.Message) error {
 	return b.handleText(ctx, msg)
 }
 
+func (b *Bot) message(chatID int64, text string) (telegram.Message, error) {
+	return b.telegram.Send(telegram.NewMessage(chatID, text))
+}
+
 func (b *Bot) streamMessage(chatID int64, msg *telegram.Message, delta string) (*telegram.Message, error) {
 	if strings.TrimSpace(delta) == "" {
 		return msg, nil
@@ -195,8 +250,8 @@ func (b *Bot) streamMessage(chatID int64, msg *telegram.Message, delta string) (
 	return &sent, err
 }
 
-func (b *Bot) notifyTyping(ctx context.Context, chatID int64) (func(), error) {
-	if _, err := b.telegram.Request(telegram.NewChatAction(chatID, telegram.ChatTyping)); err != nil {
+func (b *Bot) notify(ctx context.Context, chatID int64, action string) (func(), error) {
+	if _, err := b.telegram.Request(telegram.NewChatAction(chatID, action)); err != nil {
 		return nil, err
 	}
 
@@ -209,7 +264,7 @@ func (b *Bot) notifyTyping(ctx context.Context, chatID int64) (func(), error) {
 		for {
 			select {
 			case <-ticker.C:
-				_, err := b.telegram.Request(telegram.NewChatAction(chatID, telegram.ChatTyping))
+				_, err := b.telegram.Request(telegram.NewChatAction(chatID, action))
 				if err != nil {
 					log.WithError(err).Warn("Failed to send chat action.")
 					return
@@ -247,4 +302,18 @@ func (b *Bot) downloadFile(fileID string) (*os.File, error) {
 	}
 
 	return file, nil
+}
+
+func registerCommands(tg *telegram.BotAPI, commands map[string]string) error {
+	cmds := []telegram.BotCommand{}
+	for name, description := range commands {
+		cmds = append(cmds, telegram.BotCommand{
+			Command:     name,
+			Description: description,
+		})
+	}
+	_, err := tg.Request(telegram.NewSetMyCommandsWithScope(
+		telegram.NewBotCommandScopeAllPrivateChats(), cmds...,
+	))
+	return err
 }
